@@ -4,23 +4,24 @@
 ## AnyKernel setup
 # begin properties
 properties() { '
-kernel.string=ExampleKernel by osm0sis @ xda-developers
+kernel.string=RZ Kernel for Exynos 9810 devices
 do.devicecheck=1
 do.modules=0
 do.systemless=1
 do.cleanup=1
 do.cleanuponabort=0
-device.name1=maguro
-device.name2=toro
-device.name3=toroplus
-device.name4=tuna
-device.name5=
+device.name1=starlte
+device.name2=starltexx
+device.name3=star2lte
+device.name4=star2ltexx
+device.name5=crownlte
+device.name6=crownltexx
 supported.versions=
 supported.patchlevels=
 '; } # end properties
 
 # shell variables
-block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;
+block=/dev/block/platform/11120000.ufs/by-name/BOOT;
 is_slot_device=0;
 ramdisk_compression=auto;
 
@@ -39,25 +40,49 @@ set_perm_recursive 0 0 750 750 $ramdisk/init* $ramdisk/sbin;
 ## AnyKernel install
 dump_boot;
 
-# begin ramdisk changes
+ui_print "Remounting vendor partition";
+mount -o remount,rw /vendor;
 
-# init.rc
-backup_file init.rc;
-replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
+ui_print "Remounting system partition"
+if [ -e /system_root ]; then
+	mount -o remount,rw /system_root;
+	system_path=/system_root/system;
+elif [ -e /system/system ]; then
+	mount -o remount,rw /system;
+	system_path=/system/system;
+else
+	mount -o remount,rw /system;
+	system_path=/system;
+fi;
 
-# init.tuna.rc
-backup_file init.tuna.rc;
-insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/platform/omap/omap_hsmmc.0/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
-append_file init.tuna.rc "bootscript" init.tuna;
+sdk_ver=$(file_getprop $system_path/build.prop ro.system.build.version.sdk);
+overlay_fstab=$system_path/product/vendor_overlay/$sdk_ver/fstab.samsungexynos9810;
+vendor_fstab=/vendor/etc/fstab.samsungexynos9810;
+if [ -e ${overlay_fstab} ]; then
+	if [ ! -e ${overlay_fstab}~ ]; then
+		ui_print "Backing up overlay fstab";
+		backup_file $overlay_fstab;
+	fi;
 
-# fstab.tuna
-backup_file fstab.tuna;
-patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
-patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
-patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
-append_file fstab.tuna "usbdisk" fstab;
+	ui_print "Copying patched overlay fstab";
+	cp -f $home/vendor/etc/fstab.samsungexynos9810 $overlay_fstab;
+else
+	if [ ! -e ${vendor_fstab}~ ]; then
+		ui_print "Backing up vendor fstab";
+		backup_file $vendor_fstab;
+	fi;
 
-# end ramdisk changes
+	ui_print "Copying patched vendor fstab";
+	cp -f $home/vendor/etc/fstab.samsungexynos9810 $vendor_fstab;
+fi;
+
+ui_print "Copying vendor script";
+cp -f $home/vendor/etc/init/init.services.rc /vendor/etc/init;
+
+# Find device image/device tree
+device_name=$(file_getprop /default.prop ro.product.device);
+mv -f $home/$device_name/Image $home/Image;
+mv -f $home/$device_name/dtb.img $split_img/extra;
 
 write_boot;
 ## end install
