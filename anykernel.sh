@@ -4,23 +4,21 @@
 ## AnyKernel setup
 # begin properties
 properties() { '
-kernel.string=ExampleKernel by osm0sis @ xda-developers
+kernel.string=RZ Kernel for Exynos 8895 devices
 do.devicecheck=1
 do.modules=0
 do.systemless=1
 do.cleanup=1
 do.cleanuponabort=0
-device.name1=maguro
-device.name2=toro
-device.name3=toroplus
-device.name4=tuna
-device.name5=
-supported.versions=
+device.name1=dreamlte
+device.name2=dream2lte
+device.name3=greatlte
+supported.versions=9
 supported.patchlevels=
 '; } # end properties
 
 # shell variables
-block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;
+block=/dev/block/platform/11120000.ufs/by-name/BOOT;
 is_slot_device=0;
 ramdisk_compression=auto;
 
@@ -33,31 +31,83 @@ ramdisk_compression=auto;
 ## AnyKernel file attributes
 # set permissions/ownership for included ramdisk files
 set_perm_recursive 0 0 755 644 $ramdisk/*;
-set_perm_recursive 0 0 750 750 $ramdisk/init* $ramdisk/sbin;
-
+set_perm_recursive 0 0 750 750 $ramdisk/init*;
+set_perm_recursive 0 0 755 755 $ramdisk/rz;
+set_perm 0 0 750 $ramdisk/*.rc;
 
 ## AnyKernel install
 dump_boot;
 
-# begin ramdisk changes
+# begin system changes
+ui_print "Cleaning old RZ leftovers...";
+mount -o remount,rw /system;
+rm -f $ramdisk/rz/scripts/40perf;
+rm -f $ramdisk/rz/scripts/90userinit;
+rm -f $ramdisk/init.spectrum.rc;
+rm -f $ramdisk/init.spectrum.sh;
+rm -f $ramdisk/sbin/rz_kernel.sh;
+rm -f /system/bin/sysinit_cm;
+rm -f /system/etc/init.d/30zram;
+rm -f /system/etc/init.d/40perf;
+rm -f /system/etc/init.d/90userinit;
+rm -rf /data/rz_system;
+rm -rf /system/rz_system;
 
-# init.rc
-backup_file init.rc;
-replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
+ui_print "Cleaning previous kernels' leftovers...";
+rm -rf /system/lib/modules;
+rm -rf /system/etc/A2NKernelControl*;
+rm -f /system/etc/init.d/99_user;
+rm -rf /system/vendor/hades;
+rm -rf $ramdisk/hades;
 
-# init.tuna.rc
-backup_file init.tuna.rc;
-insert_line init.tuna.rc "nodiratime barrier=0" after "mount_all /fstab.tuna" "\tmount ext4 /dev/block/platform/omap/omap_hsmmc.0/by-name/userdata /data remount nosuid nodev noatime nodiratime barrier=0";
-append_file init.tuna.rc "bootscript" init.tuna;
+# Make init.d path if non-existent
+ui_print "Initializing init.d support...";
+mkdir /system/etc/init.d;
+chmod 755 /system/etc/init.d;
 
-# fstab.tuna
-backup_file fstab.tuna;
-patch_fstab fstab.tuna /system ext4 options "noatime,barrier=1" "noatime,nodiratime,barrier=0";
-patch_fstab fstab.tuna /cache ext4 options "barrier=1" "barrier=0,nomblk_io_submit";
-patch_fstab fstab.tuna /data ext4 options "data=ordered" "nomblk_io_submit,data=writeback";
-append_file fstab.tuna "usbdisk" fstab;
+chmod -R 0755 $home/rz_system;
 
-# end ramdisk changes
+## libsecure_storage patch ##
+ui_print "Setting libsecure_storage permissions...";
+
+# Delete wrongly replaced libsecure_storage paths
+rm -rf /system/vendor/lib/libsecure_storage.so;
+rm -rf /system/vendor/lib64/libsecure_storage.so;
+
+# Change permissions
+chmod 0644 $home/rz_system/lib/libsecure_storage.so;
+chmod 0644 $home/rz_system/lib64/libsecure_storage.so;
+
+## Vendor fimc binaries patch ##
+ui_print "Setting fimc binaries permissions...";
+device_name=$(file_getprop /default.prop ro.product.device);
+if [ "$device_name" == "dream2lte" ] || [ "$device_name" == "dreamlte" ]; then
+	rm -rf $home/rz_system/vendor/firmware_n8;
+	mv -f $home/rz_system/vendor/firmware_s8 $home/rz_system/vendor/firmware;
+elif [ "$device_name" == "greatlte" ]; then
+	rm -rf $home/rz_system/vendor/firmware_s8;
+	mv -f $home/rz_system/vendor/firmware_n8 $home/rz_system/vendor/firmware;
+fi;
+find $home/rz_system/vendor/firmware -name '*.bin' -exec chmod 0644 {} \;
+
+ui_print "Copying patched files into system path";
+cp -rf $home/rz_system /system/rz_system;
+chmod 0755 /system/rz_system;
+
+# Remove RMM lock (credits: @corsicanu)
+ui_print "Removing RMM lock... (credits: corsicanu@XDA)";
+replace_string /system/build.prop "ro.security.vaultkeeper.feature=1" "ro.security.vaultkeeper.feature=0";
+sed -i 's/vaultkeeper\.feature\=1/vaultkeeper\.feature\=0/' /system/build.prop;
+rm -f /system/lib/libvk*;
+rm -f /system/lib64/libvk*;
+rm -rf /system/priv-app/Rlc;
+rm -rf /system/priv-app/KnoxGuard;
+
+insert_line $ramdisk/init.rc "init.services.rc" after "import /init.environ.rc" "import /init.services.rc\n";
+
+# Check device dtb
+mv -f $home/*${device_name}*/Image $home/Image;
+mv -f $home/*${device_name}*/dtb_$device_name.img $split_img/extra;
 
 write_boot;
 ## end install
